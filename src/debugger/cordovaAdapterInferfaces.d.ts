@@ -24,4 +24,7 @@ interface ICordovaAttachRequestArgs extends DebugProtocol.AttachRequestArguments
     webkitRangeMax?: number;
     attachAttempts?: number;
     attachDelay?: number;
+
+    // Experimental
+    attachUrlOverride?: string;
 }

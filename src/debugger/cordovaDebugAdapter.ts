@@ -356,6 +356,10 @@ export class CordovaDebugAdapter extends WebKitDebugAdapter {
                             try {
                                 let webviewsList = JSON.parse(response);
                                 return webviewsList.filter((entry) => {
+                                    if (attachArgs.attachUrlOverride) {
+                                        return entry.url.indexOf(attachArgs.attachUrlOverride) === 0;
+                                    }
+
                                     if (this.ionicDevServerUrl) {
                                         return entry.url.indexOf(this.ionicDevServerUrl) === 0;
                                     } else {
