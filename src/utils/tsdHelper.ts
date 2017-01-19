@@ -106,7 +106,7 @@ export class TsdHelper {
 
         let referencesToPersist = references.filter(ref =>
             // Filter out references that we need to delete
-            ref && !typeDefsToRemove.some(typedef => ref.indexOf(typedef) >= 0));
+            ref && !typeDefsToRemove.some(typedef => (path.sep === '\\' ? ref.replace(/\\/g, "\/") : ref).indexOf(typedef) >= 0));
 
         referencesToPersist.length === 0 ?
             fs.unlink(indexFile) :
