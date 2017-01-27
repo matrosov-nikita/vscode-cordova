@@ -10,12 +10,15 @@ import * as rimraf from 'rimraf';
 import * as vscode from 'vscode';
 
 import * as testUtils from './testUtils';
-import {CordovaCommandHelper} from './../src/utils/CordovaCommandHelper';
-import {CordovaProjectHelper} from './../src/utils/CordovaProjectHelper';
+import {CordovaCommandHelper} from './../src/utils/cordovaCommandHelper';
+import {CordovaProjectHelper} from './../src/utils/cordovaProjectHelper';
 
 suite("VSCode Cordova extension - intellisense and command palette tests", () => {
     let testProjectPath: string = path.resolve(__dirname, "..", "..", "test", "testProject");
+    let testPlugin: string = path.resolve(__dirname, "..", "..", "test", "testPlugin");
+    let testPluginName: string = "test-plugin";
     let cordovaTypeDefDir: string = CordovaProjectHelper.getOrCreateTypingsTargetPath(testProjectPath);
+    let typingReferencePath: string = path.resolve(__dirname, "..", "..", "test", "testProject", "typings", "cordova-typings.d.ts");
 
     suiteTeardown(() => {
         // Cleanup the target folder for type definitions
@@ -31,6 +34,14 @@ suite("VSCode Cordova extension - intellisense and command palette tests", () =>
         let actualTypeDefs = testUtils.enumerateListOfTypeDefinitions(testProjectPath);
         assert.deepEqual(actualTypeDefs, expectedTypedDefs);
     };
+
+    function checkReferenceFileContainPlugin(pluginName: string, expectedResult: boolean) {
+         return fs.readFile(typingReferencePath, 'utf8', (err, data) => {
+            assert.ifError(err);
+            let pluginRelativePath: string = path.join("cordova", "plugins", `${testPluginName}.d.ts`);
+            assert.equal(data.indexOf(pluginRelativePath) > 0 || data.replace(/\\/g, '/').indexOf(pluginRelativePath) > 0, expectedResult);
+        });
+    }
 
     test('#Plugin type definitions are installed on activation', () => {
         return Q.delay(10000).then(() => {
@@ -56,7 +67,32 @@ suite("VSCode Cordova extension - intellisense and command palette tests", () =>
             });
     });
 
-    test('#Verify that the commands registered by Cordova extension are loaded', () => {
+    test("#Plugin type definition for a plugin is added from '<pluginName>/types'", () => {
+        return testUtils.addCordovaComponents("plugin", testProjectPath, [testPlugin])
+            .then(() => {
+                return Q.delay(10000);
+            }).then(() => {
+                checkTypeDefinitions(["FileSystem.d.ts", "test-plugin.d.ts"]);
+            });
+    });
+
+    test("#Reference to custom plugin's type definition is added upon adding that plugin", () => {
+        assert(fs.existsSync(typingReferencePath));
+        checkReferenceFileContainPlugin(testPluginName, true);
+    });
+
+    test("#Reference to custom plugin's type definition is removed after removal of that plugin", () => {
+        assert(fs.existsSync(typingReferencePath));
+        return testUtils.removeCordovaComponents("plugin", testProjectPath, [testPluginName])
+            .then(() => {
+                return Q.delay(10000);
+            }).then(() => {
+                checkTypeDefinitions(["FileSystem.d.ts"]);
+                checkReferenceFileContainPlugin(testPluginName, false);
+            });
+    });
+
+   test('#Verify that the commands registered by Cordova extension are loaded', () => {
         return vscode.commands.getCommands(true)
             .then((results) => {
                 let cordovaCmdsAvailable = results.filter((commandName: string) => {

@@ -14,7 +14,7 @@ var Q = require('q');
 var typescript = require('typescript');
 
 function executeCordovaCommand(cwd, command) {
-    var cordovaCmd = os.platform() === "darwin" ? "cordova" : "cordova.cmd";
+    var cordovaCmd = os.platform() === "win32" ? "cordova.cmd" : "cordova";
     var commandToExecute = cordovaCmd + " " + command;
     return executeCommand(cwd, commandToExecute);
 }

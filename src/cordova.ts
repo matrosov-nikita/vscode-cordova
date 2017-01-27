@@ -15,6 +15,7 @@ import {PluginSimulator} from "./extension/simulate";
 import {Telemetry} from './utils/telemetry';
 import {TelemetryHelper} from './utils/telemetryHelper';
 import {IProjectType} from './utils/cordovaProjectHelper';
+import {TypingInfo} from './utils/typingInfo';
 import {TsdHelper} from './utils/tsdHelper';
 
 let PLUGIN_TYPE_DEFS_FILENAME = "pluginTypings.json";
@@ -108,16 +109,17 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Install Ionic type definitions if necessary
     if (CordovaProjectHelper.isIonicProject(cordovaProjectRoot)) {
-        let ionicTypings: string[] = [
+        let ionicTypingPaths: string[] = [
             path.join("jquery", "jquery.d.ts"),
             path.join("cordova-ionic", "plugins", "keyboard.d.ts")
         ];
         if (CordovaProjectHelper.isIonic1Project(cordovaProjectRoot)) {
-            ionicTypings = ionicTypings.concat([
+            ionicTypingPaths = ionicTypingPaths.concat([
                 path.join("angularjs", "angular.d.ts"),
                 path.join("ionic", "ionic.d.ts")
             ]);
         }
+        let ionicTypings: TypingInfo[] = ionicTypingPaths.map(ionicTypingPath => new TypingInfo(ionicTypingPath));
         TsdHelper.installTypings(CordovaProjectHelper.getOrCreateTypingsTargetPath(cordovaProjectRoot), ionicTypings, cordovaProjectRoot);
     }
 
@@ -126,8 +128,9 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
     }
 
+    let cordovaTyping = [new TypingInfo(pluginTypings[CORDOVA_TYPINGS_QUERYSTRING].typingFile)]
     // Install the type defintion files for Cordova
-    TsdHelper.installTypings(CordovaProjectHelper.getOrCreateTypingsTargetPath(cordovaProjectRoot), [pluginTypings[CORDOVA_TYPINGS_QUERYSTRING].typingFile], cordovaProjectRoot);
+    TsdHelper.installTypings(CordovaProjectHelper.getOrCreateTypingsTargetPath(cordovaProjectRoot), cordovaTyping, cordovaProjectRoot);
 
     // Install type definition files for the currently installed plugins
     updatePluginTypeDefinitions(cordovaProjectRoot);
@@ -151,8 +154,36 @@ export function deactivate(context: vscode.ExtensionContext): void {
 }
 
 function getPluginTypingsJson(): any {
+    let cordovaProjectRoot: string = CordovaProjectHelper.getCordovaProjectRoot(vscode.workspace.rootPath);
+    let installedPlugins: string[] = CordovaProjectHelper.getInstalledPlugins(cordovaProjectRoot);
+
+    let pluginTypings = installedPlugins
+        .map((pluginName) => {
+            let pluginPath: string =  path.join(cordovaProjectRoot, 'plugins', pluginName);
+            return path.join(pluginPath, 'package.json');
+        })
+        .filter(fs.existsSync)
+        .map((packageJsonPath) => {
+            let packageJsonContent: string = fs.readFileSync(packageJsonPath).toString();
+            return JSON.parse(packageJsonContent);
+        })
+        .filter((packageJson) => !!packageJson.types)
+        .reduce((currentPluginTypings, packageJson) => {
+            let pluginName: string = packageJson.name;
+            let pluginPath: string = path.join(cordovaProjectRoot, 'plugins', pluginName);
+
+            currentPluginTypings[pluginName] = new TypingInfo(path.join(pluginPath, packageJson.types), pluginName);
+
+            return currentPluginTypings;
+        }, {});
+
     if (CordovaProjectHelper.existsSync(PLUGIN_TYPE_DEFS_PATH)) {
-        return require(PLUGIN_TYPE_DEFS_PATH);
+        let typingPaths = require(PLUGIN_TYPE_DEFS_PATH);
+        let typings = Object.keys(typingPaths).reduce((typings, pluginName) => {
+            typings[pluginName] = new TypingInfo(typingPaths[pluginName].typingFile);
+            return typings;
+        }, {});
+        return Object.assign({}, typings, pluginTypings);
     }
 
     console.error("Cordova plugin type declaration mapping file \"pluginTypings.json\" is missing from the extension folder.");
@@ -166,9 +197,13 @@ function getNewTypeDefinitions(installedPlugins: string[]): string[] {
         return;
     }
 
-    return installedPlugins.filter(pluginName => !!pluginTypings[pluginName])
-        .map(pluginName => pluginTypings[pluginName].typingFile);
+    return installedPlugins
+        .filter(pluginName => !!pluginTypings[pluginName])
+        .map(pluginName => {
+            return pluginTypings[pluginName].getTypingRelativePath()
+        });
 }
+
 
 function addPluginTypeDefinitions(projectRoot: string, installedPlugins: string[], currentTypeDefs: string[]): void {
     let pluginTypings = getPluginTypingsJson();
@@ -178,7 +213,8 @@ function addPluginTypeDefinitions(projectRoot: string, installedPlugins: string[
 
     let typingsToAdd = installedPlugins.filter((pluginName: string) => {
         if (pluginTypings[pluginName]) {
-            return currentTypeDefs.indexOf(pluginTypings[pluginName].typingFile) < 0;
+            let typingRelativePath = pluginTypings[pluginName].getTypingRelativePath();
+            return currentTypeDefs.indexOf(typingRelativePath) < 0 && currentTypeDefs.indexOf(typingRelativePath.replace(/\\/g, '/')) < 0;
         }
 
         // If we do not know the plugin, collect it anonymously for future prioritisation
@@ -186,9 +222,7 @@ function addPluginTypeDefinitions(projectRoot: string, installedPlugins: string[
         unknownPluginEvent.setPiiProperty('plugin', pluginName);
         Telemetry.send(unknownPluginEvent);
         return false;
-    }).map((pluginName: string) => {
-        return pluginTypings[pluginName].typingFile;
-    });
+    }).map(pluginName => new TypingInfo(pluginTypings[pluginName].typingFile, pluginTypings[pluginName].pluginName));
 
     TsdHelper.installTypings(CordovaProjectHelper.getOrCreateTypingsTargetPath(projectRoot),
         typingsToAdd, CordovaProjectHelper.getCordovaProjectRoot(vscode.workspace.rootPath));
@@ -197,7 +231,7 @@ function addPluginTypeDefinitions(projectRoot: string, installedPlugins: string[
 function removePluginTypeDefinitions(projectRoot: string, currentTypeDefs: string[], newTypeDefs: string[]): void {
     // Find the type definition files that need to be removed
     let typeDefsToRemove = currentTypeDefs
-        .filter((typeDef: string) => newTypeDefs.indexOf(typeDef) < 0)
+        .filter((typeDef: string) => newTypeDefs.indexOf(typeDef) < 0 && newTypeDefs.indexOf(typeDef.replace(/\//g, '\\')) < 0);
 
     TsdHelper.removeTypings(CordovaProjectHelper.getOrCreateTypingsTargetPath(projectRoot), typeDefsToRemove, projectRoot);
 }
@@ -213,7 +247,6 @@ function updatePluginTypeDefinitions(cordovaProjectRoot: string): void {
     // between typings we install and user-installed ones.
     if (CordovaProjectHelper.isIonic2Project(cordovaProjectRoot) ||
         CordovaProjectHelper.isTypescriptProject(cordovaProjectRoot)) {
-
         return;
     }
 
