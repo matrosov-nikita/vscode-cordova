@@ -71,6 +71,15 @@ export function cordovaStartCommand(args: string[], cordovaRootPath: string): ch
 }
 
 export function killChildProcess(childProcess: child_process.ChildProcess): Q.Promise<void> {
-    TreeKill(childProcess.pid, 'SIGKILL');
-    return Q<void>(void 0);
+    let deferred = Q.defer<void>();
+    let killCallback = (error) => {
+        if (error) {
+            deferred.reject(error);
+        } else {
+            deferred.resolve();
+        }
+    }
+
+    TreeKill(childProcess.pid, 'SIGKILL', killCallback);
+    return deferred.promise;
 }

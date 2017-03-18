@@ -220,8 +220,9 @@ export class CordovaDebugAdapter extends ChromeDebugAdapter {
     }
 
     public disconnect(): void {
-        this.cleanUp();
-        return super.disconnect();
+        this.cleanUp().then(() => {
+            super.disconnect();
+        });
     }
 
     public commonArgs(args: ICommonRequestArgs): void {
