@@ -531,21 +531,44 @@ export class CordovaDebugAdapter extends ChromeDebugAdapter {
                     throw new Error('Unable to find iOS target device/simulator. Please check that "Settings > Safari > Advanced > Web Inspector = ON" or try specifying a different "port" parameter in launch.json');
                 }
             }).then((targetPort) => {
+                let getCommandPathByPID = (pid) => {
+                    return new Promise((resolve, reject) => {
+                        child_process.exec(`ps -p ${pid} -o command`, (error, stdout, stderr) => {
+                            if (error) {
+                                return reject(error);
+                            }
+
+                            resolve(stdout);
+                        });
+                    });
+                };
+
+                let verifyWebview = (webview) => {
+                    if (this.ionicDevServerUrl) {
+                        return webview.url.indexOf(this.ionicDevServerUrl) === 0;
+                    } else {
+                        return webview.url.indexOf(encodeURIComponent(packagePath)) !== -1;
+                    }
+                }
+
                 let findWebviewFunc = () => {
                     return this.promiseGet(`http://localhost:${targetPort}/json`, 'Unable to communicate with target')
                         .then((response: string) => {
-                            try {
-                                let webviewsList = JSON.parse(response);
-                                return webviewsList.filter((entry) => {
-                                    if (this.ionicDevServerUrl) {
-                                        return entry.url.indexOf(this.ionicDevServerUrl) === 0;
-                                    } else {
-                                        return entry.url.indexOf(encodeURIComponent(packagePath)) !== -1;
+                            let webviewsList = JSON.parse(response);
+
+                            return Promise.all(webviewsList.map(entry => {
+                                if (verifyWebview(entry)) return entry;
+
+                                let pid = entry.appId.split(':')[1];
+                                return getCommandPathByPID(pid).then(commandPath => {
+                                    if (commandPath.indexOf(encodeURIComponent(packagePath)) !== -1) {
+                                        return entry;
                                     }
                                 });
-                            } catch (e) {
-                                throw new Error('Unable to find target app');
-                            }
+                            })).then(webviews => webviews.filter(Boolean));
+                        })
+                        .catch((err) => {
+                            throw new Error('Unable to find target app');
                         });
                 };
 
